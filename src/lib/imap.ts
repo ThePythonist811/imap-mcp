@@ -1,6 +1,7 @@
 import { ImapFlow, type FetchMessageObject, type ListResponse } from "imapflow";
 import { simpleParser, type ParsedMail } from "mailparser";
 import { decrypt } from "@/lib/crypto";
+import { assertPublicHost } from "@/lib/netguard";
 import type { MailAccount } from "@/lib/db/schema";
 
 export type AccountLike = Pick<
@@ -25,6 +26,7 @@ export async function withImap<T>(
   acc: AccountLike,
   fn: (client: ImapFlow) => Promise<T>,
 ): Promise<T> {
+  await assertPublicHost(acc.imapHost);
   const client = buildClient(acc);
   await client.connect();
   try {

@@ -1,6 +1,7 @@
 import { DAVClient, type DAVCalendar, type DAVCalendarObject } from "tsdav";
 import ICAL from "ical.js";
 import { decrypt } from "@/lib/crypto";
+import { assertPublicUrl } from "@/lib/netguard";
 import type { CalendarAccount } from "@/lib/db/schema";
 import {
   isValidIanaTz,
@@ -46,6 +47,7 @@ export async function withDav<T>(
   acc: CalendarAccountLike,
   fn: (client: DAVClient) => Promise<T>,
 ): Promise<T> {
+  await assertPublicUrl(acc.caldavUrl);
   const client = buildClient(acc);
   await client.login();
   // tsdav uses ephemeral fetch under the hood — no teardown required.

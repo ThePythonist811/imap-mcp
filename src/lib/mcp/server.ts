@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { McpContext } from "./context";
 import {
@@ -111,6 +112,43 @@ function parseDate(input: string | undefined): Date | undefined {
   return d;
 }
 
+const READ_ONLY = { readOnlyHint: true, openWorldHint: false } as const;
+const SAFE_WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
+const DESTRUCTIVE = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } as const;
+// Leaves the user's mailbox: cannot be undone and reaches third parties.
+const SENDS = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } as const;
+
+const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
+  list_accounts: READ_ONLY,
+  list_folders: READ_ONLY,
+  list_messages: READ_ONLY,
+  get_message: READ_ONLY,
+  search_messages: READ_ONLY,
+  get_thread: READ_ONLY,
+  get_attachment: READ_ONLY,
+  list_calendar_accounts: READ_ONLY,
+  list_calendars: READ_ONLY,
+  list_events: READ_ONLY,
+  get_event: READ_ONLY,
+  find_free_slots: READ_ONLY,
+  mark_read: SAFE_WRITE,
+  mark_unread: SAFE_WRITE,
+  flag_messages: SAFE_WRITE,
+  unflag_messages: SAFE_WRITE,
+  set_flags: SAFE_WRITE,
+  copy_messages: { ...SAFE_WRITE, idempotentHint: false },
+  create_folder: SAFE_WRITE,
+  create_event: { ...SAFE_WRITE, idempotentHint: false, openWorldHint: true },
+  move_messages: DESTRUCTIVE,
+  rename_folder: DESTRUCTIVE,
+  delete_messages: DESTRUCTIVE,
+  delete_folder: DESTRUCTIVE,
+  update_event: { ...DESTRUCTIVE, openWorldHint: true },
+  delete_event: { ...DESTRUCTIVE, openWorldHint: true },
+  send_message: SENDS,
+  reply_message: SENDS,
+};
+
 export function buildMcpServer(ctx: McpContext): McpServer {
   const server = new McpServer(
     { name: "imap-mcp", version: "0.1.0" },
@@ -120,6 +158,13 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         "This server gives access to the current user's registered IMAP email accounts AND their CalDAV calendar accounts.\n\nEMAIL — Call list_accounts first to discover email account IDs; the response carries each account's `writingStyleInstructions`, a pre-rendered directive you MUST follow verbatim when drafting via send_message or reply_message (it covers language, tone, formality, greeting, sign-off, length, emoji policy and custom user rules). IMAP folders are identified by their path; messages by their UID.\n\nCALENDAR — Call list_calendar_accounts to discover calendar account IDs (independent of email accounts), then list_calendars to find calendar collection URLs. Events use ETag-based optimistic concurrency: keep the `etag` returned by list_events / get_event and pass it to update_event / delete_event — a stale etag returns 412 Precondition Failed and you should re-fetch.\n\nTIMEZONES — Every event response carries `start`/`end` (UTC ISO), `startLocal`/`endLocal` (wall-clock when a TZID is set) and `tz` (IANA name, e.g. \"Europe/Paris\", or null when stored as UTC). When creating/updating events, pass `tz` to anchor the event to a real timezone — recurring events then survive DST correctly. For `start`/`end`, pass either a floating local time like \"2026-05-01T10:00:00\" interpreted in the given `tz`, or a zoned/UTC ISO (\"…Z\" / \"…+02:00\") which will be converted to the tz local time. Omit `tz` to store the event in UTC. Recurring events return their raw RRULE; pass expand_recurring=true on list_events to expand individual occurrences within the requested time range.",
     },
   );
+
+  // Attach behaviour hints to every tool so clients can tell harmless reads from
+  // actions that send mail or delete data (and ask the user before those).
+  const register = server.registerTool.bind(server);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  server.registerTool = ((name: string, config: any, cb: any) =>
+    register(name, { ...config, annotations: { ...TOOL_ANNOTATIONS[name], ...config.annotations } }, cb)) as typeof server.registerTool;
 
   server.registerTool(
     "list_accounts",

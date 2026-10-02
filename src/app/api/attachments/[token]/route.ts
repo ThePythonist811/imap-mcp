@@ -34,10 +34,9 @@ export async function GET(
       payload.index,
     );
   } catch (e) {
-    return new NextResponse(
-      `imap error: ${e instanceof Error ? e.message : "unknown"}`,
-      { status: 502 },
-    );
+    // Log details server-side; don't reveal mail server internals to whoever holds the link.
+    console.error("attachment fetch failed:", e instanceof Error ? e.message : e);
+    return new NextResponse("could not fetch attachment", { status: 502 });
   }
 
   if (!attachment) {

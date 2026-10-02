@@ -11,7 +11,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "test": "node --test --experimental-strip-types test/*.test.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.12.0",
@@ -19,13 +20,13 @@
     "@tiptap/pm": "^2.11.0",
     "@tiptap/react": "^2.11.0",
     "@tiptap/starter-kit": "^2.11.0",
-    "drizzle-orm": "^0.38.0",
+    "drizzle-orm": "^0.45.3",
     "ical.js": "^2.2.1",
     "imapflow": "^1.0.165",
     "isomorphic-dompurify": "^2.19.0",
     "mailparser": "^3.7.2",
     "next": "^15.2.3",
-    "nodemailer": "^6.9.16",
+    "nodemailer": "^10.0.13",
     "pg": "^8.13.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -35,11 +36,11 @@
   "devDependencies": {
     "@types/mailparser": "^3.4.5",
     "@types/node": "^22.10.5",
-    "@types/nodemailer": "^6.4.17",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.11.10",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
-    "drizzle-kit": "^0.30.1",
+    "drizzle-kit": "^0.31.11",
     "typescript": "^5.7.2"
   },
   "engines": {

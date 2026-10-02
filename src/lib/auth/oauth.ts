@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
@@ -36,7 +36,6 @@ export function verifyPkce(
   challenge: string,
   method: string,
 ): boolean {
-  if (method === "plain") return verifier === challenge;
   if (method !== "S256") return false;
   const digest = createHash("sha256").update(verifier).digest();
   return digest.toString("base64url") === challenge;
@@ -83,8 +82,9 @@ export async function createAuthCode(input: {
   scope: string | null;
 }): Promise<string> {
   const code = randomToken(32);
+  // Only the hash is stored, like access/refresh tokens.
   await db.insert(oauthAuthCodes).values({
-    code,
+    code: sha256(code),
     clientId: input.clientId,
     userId: input.userId,
     redirectUri: input.redirectUri,
@@ -106,22 +106,19 @@ export async function consumeAuthCode(
   codeChallengeMethod: string;
   scope: string | null;
 } | null> {
+  // Single UPDATE ... RETURNING: two concurrent redemptions cannot both succeed.
   const [row] = await db
-    .select()
-    .from(oauthAuthCodes)
+    .update(oauthAuthCodes)
+    .set({ consumedAt: new Date() })
     .where(
       and(
-        eq(oauthAuthCodes.code, code),
+        eq(oauthAuthCodes.code, sha256(code)),
         isNull(oauthAuthCodes.consumedAt),
         gt(oauthAuthCodes.expiresAt, new Date()),
       ),
     )
-    .limit(1);
+    .returning();
   if (!row) return null;
-  await db
-    .update(oauthAuthCodes)
-    .set({ consumedAt: new Date() })
-    .where(eq(oauthAuthCodes.code, code));
   return {
     clientId: row.clientId,
     userId: row.userId,
@@ -182,24 +179,19 @@ export async function resolveAccessToken(access: string): Promise<OAuthToken | n
 }
 
 export async function rotateRefresh(refresh: string): Promise<OAuthToken | null> {
-  const hash = sha256(refresh);
+  // Revoke-and-return in one statement so a refresh token can be used only once.
   const [row] = await db
-    .select()
-    .from(oauthTokens)
-    .where(
-      and(
-        eq(oauthTokens.refreshTokenHash, hash),
-        isNull(oauthTokens.revokedAt),
-      ),
-    )
-    .limit(1);
-  if (!row) return null;
-  if (row.refreshExpiresAt && row.refreshExpiresAt.getTime() < Date.now()) return null;
-  await db
     .update(oauthTokens)
     .set({ revokedAt: new Date() })
-    .where(eq(oauthTokens.id, row.id));
-  return row;
+    .where(
+      and(
+        eq(oauthTokens.refreshTokenHash, sha256(refresh)),
+        isNull(oauthTokens.revokedAt),
+        gt(oauthTokens.refreshExpiresAt, new Date()),
+      ),
+    )
+    .returning();
+  return row ?? null;
 }
 
 export async function revokeByAccessToken(access: string): Promise<void> {
@@ -216,4 +208,65 @@ export async function revokeByRefreshToken(refresh: string): Promise<void> {
     .update(oauthTokens)
     .set({ revokedAt: new Date() })
     .where(eq(oauthTokens.refreshTokenHash, hash));
+}
+
+// --- Redirect allowlist ---------------------------------------------------------
+// Dynamic client registration is anonymous. Without this, anyone could register a
+// client that redirects to their own server and phish an authorization code.
+
+const DEFAULT_REDIRECTS = [
+  "https://claude.ai/api/mcp/auth_callback",
+  "https://claude.com/api/mcp/auth_callback",
+];
+
+export function isAllowedRedirectUri(uri: string): boolean {
+  const exact = (process.env.ALLOWED_REDIRECT_URIS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if ((exact.length ? exact : DEFAULT_REDIRECTS).includes(uri)) return true;
+  if (process.env.ALLOW_LOOPBACK_REDIRECTS === "false") return false;
+  try {
+    const u = new URL(uri);
+    return u.protocol === "http:" && (u.hostname === "localhost" || u.hostname === "127.0.0.1");
+  } catch {
+    return false;
+  }
+}
+
+// --- Consent CSRF token -----------------------------------------------------------
+// The consent form carries an HMAC over (user, client, redirect, PKCE challenge, expiry),
+// so a cross-site POST cannot approve a request and a token cannot be replayed elsewhere.
+
+function consentKey(): Buffer {
+  const raw = process.env.MCP_MASTER_KEY;
+  if (!raw) throw new Error("MCP_MASTER_KEY is not set");
+  return createHmac("sha256", Buffer.from(raw, "base64")).update("oauth-consent-v1").digest();
+}
+
+interface ConsentFields {
+  userId: string;
+  clientId: string;
+  redirectUri: string;
+  codeChallenge: string;
+}
+
+function consentMac(p: ConsentFields, exp: number): string {
+  return createHmac("sha256", consentKey())
+    .update([p.userId, p.clientId, p.redirectUri, p.codeChallenge, exp].join("\n"))
+    .digest("base64url");
+}
+
+export function signConsent(p: ConsentFields): string {
+  const exp = Math.floor(Date.now() / 1000) + 600;
+  return `${exp}.${consentMac(p, exp)}`;
+}
+
+export function verifyConsent(token: string, p: ConsentFields): boolean {
+  const [expStr, mac] = token.split(".");
+  const exp = Number(expStr);
+  if (!exp || !mac || exp < Math.floor(Date.now() / 1000)) return false;
+  const a = Buffer.from(mac);
+  const b = Buffer.from(consentMac(p, exp));
+  return a.length === b.length && timingSafeEqual(a, b);
 }

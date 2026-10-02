@@ -1,9 +1,10 @@
-import nodemailer from "nodemailer";
+import nodemailer, { type SendMailOptions, type Transporter } from "nodemailer";
 import MailComposer from "nodemailer/lib/mail-composer";
 import DOMPurify from "isomorphic-dompurify";
 import { decrypt } from "@/lib/crypto";
 import type { MailAccount } from "@/lib/db/schema";
 import { saveToSentFolder, type AccountLike } from "@/lib/imap";
+import { assertPublicHost } from "@/lib/netguard";
 
 export type SmtpAccountLike = Pick<
   MailAccount,
@@ -48,6 +49,7 @@ function buildTransport(acc: SmtpAccountLike) {
 }
 
 export async function testSmtpConnection(acc: SmtpAccountLike): Promise<void> {
+  await assertPublicHost(acc.smtpHost);
   const transport = buildTransport(acc);
   try {
     await transport.verify();
@@ -135,8 +137,8 @@ function escapeHtml(s: string): string {
 function buildRawMime(
   mailOptions: Parameters<typeof nodemailer.createTransport>[0] extends never
     ? never
-    : Parameters<nodemailer.Transporter["sendMail"]>[0],
-): Promise<{ raw: Buffer; envelope: nodemailer.SendMailOptions["envelope"]; messageId: string }> {
+    : Parameters<Transporter["sendMail"]>[0],
+): Promise<{ raw: Buffer; envelope: SendMailOptions["envelope"]; messageId: string }> {
   return new Promise((resolve, reject) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const composer = new MailComposer(mailOptions as any);
@@ -156,10 +158,11 @@ export async function sendMail(
   acc: SmtpAccountLike,
   input: SendMailInput,
 ): Promise<SendMailResult> {
+  await assertPublicHost(acc.smtpHost);
   const transport = buildTransport(acc);
   try {
     const { text, html } = appendSignature(acc, input);
-    const mailOptions: nodemailer.SendMailOptions = {
+    const mailOptions: SendMailOptions = {
       from: buildFromAddress(acc),
       to: input.to.join(", "),
       cc: input.cc?.join(", "),

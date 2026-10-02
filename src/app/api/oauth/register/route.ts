@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { registerClient } from "@/lib/auth/oauth";
+import { isAllowedRedirectUri, registerClient } from "@/lib/auth/oauth";
 
 export const dynamic = "force-dynamic";
 
 const schema = z.object({
-  redirect_uris: z.array(z.string().url()).min(1),
-  client_name: z.string().optional(),
+  redirect_uris: z.array(z.string().url()).min(1).max(5),
+  client_name: z.string().max(100).optional(),
   token_endpoint_auth_method: z.enum(["none", "client_secret_basic", "client_secret_post"]).optional(),
   grant_types: z.array(z.string()).optional(),
   response_types: z.array(z.string()).optional(),
@@ -18,6 +18,13 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json(
       { error: "invalid_client_metadata", error_description: parsed.error.message },
+      { status: 400 },
+    );
+  }
+  const bad = parsed.data.redirect_uris.filter((u) => !isAllowedRedirectUri(u));
+  if (bad.length) {
+    return NextResponse.json(
+      { error: "invalid_redirect_uri", error_description: `redirect_uri not allowed: ${bad.join(", ")}` },
       { status: 400 },
     );
   }
