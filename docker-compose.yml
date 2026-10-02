@@ -14,7 +14,7 @@ services:
       timeout: 5s
       retries: 10
     ports:
-      - "24819:5432"
+      - "127.0.0.1:24819:5432"
 
   app:
     build:
@@ -29,7 +29,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "17483:3000"
+      - "127.0.0.1:17483:3000"
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-mcp}:${POSTGRES_PASSWORD:-mcp}@postgres:5432/${POSTGRES_DB:-mcp}
 
