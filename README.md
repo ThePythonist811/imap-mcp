@@ -11,6 +11,20 @@
 
 ---
 
+## Fork and attribution
+
+This is a fork of [`cldt-fr/imap-mcp`](https://github.com/cldt-fr/imap-mcp) by
+**Clément de Louvencourt** (MIT). The architecture, the IMAP/SMTP/CalDAV logic,
+the MCP tools and the UI are his. My own contribution is the security
+hardening on top: a consent page in front of the OAuth authorize step, a
+redirect-URI allowlist, an SSRF guard on IMAP/SMTP/CalDAV host resolution,
+tool annotations so clients can tell reads from sends and deletes, stricter
+security headers, and binding the app and database ports to localhost only.
+See the commit history for the exact diff. Full credit to Clément for the
+original implementation — go star the upstream repo.
+
+---
+
 ## Why
 
 MCP clients (Claude Desktop, Claude.ai, …) can talk to remote servers, but none of them ship with a way to plug **your own** IMAP/SMTP and CalDAV accounts securely. Shoving raw credentials into a client config or shipping them to a third-party SaaS is a non-starter for anything serious.
